@@ -163,13 +163,30 @@ class Workload_Manager():
         """
         
         # Load CPU data from a CSV file
-        # One year data=24*365=8760
+        # REFACTORED (Nov 2025): Now supports variable-length datasets, not just 8760 hours
+        # This enables benchmarking diverse workload traces (e.g., Alibaba Spot GPU v2026 with 184 days)
         if workload_filename == '':
-            cpu_data_list = pd.read_csv(PATH+'/data/Workload/Alibaba_CPU_Data_Hourly_1.csv')['cpu_load'].values[:8760]
+            cpu_data_list = pd.read_csv(PATH+'/data/Workload/Alibaba_CPU_Data_Hourly_1.csv')['cpu_load'].values
         else:
-            cpu_data_list = pd.read_csv(PATH+f'/data/Workload/{workload_filename}')['cpu_load'].values[:8760]
+            cpu_data_list = pd.read_csv(PATH+f'/data/Workload/{workload_filename}')['cpu_load'].values
 
-        assert len(cpu_data_list) == 8760, "The number of data points in the workload data is not one year data=24*365=8760."
+        # Validation: Ensure sufficient data for at least one episode
+        # Minimum requirement: 7 days (typical episode length in SustainDC configs)
+        min_hours_required = 7 * 24  # 168 hours = 1 week
+        if len(cpu_data_list) < min_hours_required:
+            raise ValueError(
+                f"Workload data too short: {len(cpu_data_list)} hours ({len(cpu_data_list)/24:.1f} days). "
+                f"Minimum required: {min_hours_required} hours (7 days) for one episode. "
+                f"Please provide a longer workload trace."
+            )
+
+        # Log dataset information for user awareness
+        print(f"[Workload_Manager] Loaded workload data: {len(cpu_data_list)} hours ({len(cpu_data_list)/24:.1f} days)")
+
+        # Warn if dataset is shorter than one year (some configs may expect 365 days)
+        if len(cpu_data_list) < 8760:
+            print(f"[Workload_Manager] ⚠️  Dataset shorter than 1 year ({len(cpu_data_list)} vs 8760 hours). "
+                  f"Episodes starting late in the year may wrap around to the beginning of the dataset.")
 
         cpu_data_list = cpu_data_list.astype(float)
         self.time_step = 0
@@ -254,7 +271,13 @@ class Workload_Manager():
         Returns:
             float: CPU workload at current time step.
         """
-        self.time_step = (init_day if init_day is not None else self.init_day) * self.time_steps_day + (init_hour if init_hour is not None else 0) * self.timestep_per_hour
+        # REFACTORED (Nov 2025): Add bounds checking for variable-length datasets
+        # Calculate the requested timestep, then wrap around if it exceeds available data
+        requested_timestep = (init_day if init_day is not None else self.init_day) * self.time_steps_day + (init_hour if init_hour is not None else 0) * self.timestep_per_hour
+
+        # Wrap around if requested timestep exceeds available data (modulo operation)
+        # This allows episodes to start at any day without IndexError
+        self.time_step = requested_timestep % len(self.original_data)
         self.init_time_step = self.time_step
         
         baseline = np.random.random()*0.5 - 0.25
@@ -290,13 +313,17 @@ class Workload_Manager():
             float: Amount of daily flexible workload
         """
         self.time_step += 1
-        
+
         # If it tries to read further, restart from the inital day
         if self.time_step >= len(self.cpu_smooth):
             self.time_step = self.init_time_step
-        
+
         self._current_workload = self.cpu_smooth[self.time_step]
-        self._next_workload = self.cpu_smooth[self.time_step + 1]
+
+        # REFACTORED (Nov 2025): Handle next_workload bounds checking for variable-length datasets
+        # Use modulo to wrap around if next timestep would exceed array length
+        next_timestep = (self.time_step + 1) % len(self.cpu_smooth)
+        self._next_workload = self.cpu_smooth[next_timestep]
         
         # assert self.time_step < len(self.cpu_smooth), f'Episode length: {self.time_step} is longer than the provide cpu_smooth: {len(self.cpu_smooth)}'
         return self._current_workload  # to avoid logical error
@@ -340,13 +367,28 @@ class CI_Manager():
             timezone_shift (int, optional): Shift for the timezone. Defaults to 0.
         """
         # Load carbon intensity data from a CSV file
-        # One year data=24*365=8760
+        # REFACTORED (Nov 2025): Now supports variable-length datasets, not just 8760 hours
+        # Aligned with Workload_Manager refactoring for consistency across data managers
         if not location == '':
-            carbon_data_list = pd.read_csv(PATH+f"/data/CarbonIntensity/{location}_NG_&_avgCI.csv")['avg_CI'].values[:8760]
+            carbon_data_list = pd.read_csv(PATH+f"/data/CarbonIntensity/{location}_NG_&_avgCI.csv")['avg_CI'].values
         else:
-            carbon_data_list = pd.read_csv(PATH+f"/data/CarbonIntensity/{filename}")['avg_CI'].values[:8760]
+            carbon_data_list = pd.read_csv(PATH+f"/data/CarbonIntensity/{filename}")['avg_CI'].values
 
-        assert len(carbon_data_list) == 8760, "The number of data points in the carbon intensity data is not one year data=24*365=8760."
+        # Validation: Ensure sufficient data for at least one episode
+        min_hours_required = 7 * 24  # 168 hours = 1 week
+        if len(carbon_data_list) < min_hours_required:
+            raise ValueError(
+                f"Carbon intensity data too short: {len(carbon_data_list)} hours ({len(carbon_data_list)/24:.1f} days). "
+                f"Minimum required: {min_hours_required} hours (7 days) for one episode."
+            )
+
+        # Log dataset information
+        print(f"[Carbon_Manager] Loaded carbon intensity data: {len(carbon_data_list)} hours ({len(carbon_data_list)/24:.1f} days)")
+
+        # Warn if dataset is shorter than one year
+        if len(carbon_data_list) < 8760:
+            print(f"[Carbon_Manager] ⚠️  Dataset shorter than 1 year ({len(carbon_data_list)} vs 8760 hours). "
+                  f"Episodes may wrap around to the beginning of the dataset.")
         self.debug = debug
         carbon_data_list = carbon_data_list.astype(float)
         self.init_day = init_day
@@ -409,7 +451,9 @@ class CI_Manager():
             float: Carbon intensity at current time step.
             float: Normalized carbon intensity at current time step and its forecast.
         """
-        self.time_step = (init_day if init_day is not None else self.init_day) * self.time_steps_day + (init_hour if init_hour is not None else 0) * self.timestep_per_hour
+        # REFACTORED (Nov 2025): Add bounds checking for variable-length datasets (same as Workload_Manager)
+        requested_timestep = (init_day if init_day is not None else self.init_day) * self.time_steps_day + (init_hour if init_hour is not None else 0) * self.timestep_per_hour
+        self.time_step = requested_timestep % len(self.original_data)  # Wrap around if exceeds data length
 
         # Add noise to the carbon data using the CoherentNoise
         self.carbon_smooth = self.original_data# + self.coherent_noise.generate(len(self.original_data))
@@ -440,11 +484,21 @@ class CI_Manager():
             # self.norm_carbon = self.carbon_smooth
         
         self._current_carbon_smooth = self.carbon_smooth[self.time_step]
-        self._next_carbon_smooth = self.carbon_smooth[self.time_step + 1]
-        
+        # REFACTORED (Nov 2025): Add bounds checking for next timestep access
+        next_timestep = (self.time_step + 1) % len(self.carbon_smooth)
+        self._next_carbon_smooth = self.carbon_smooth[next_timestep]
+
         self._current_norm_carbon = self.norm_carbon[self.time_step]
-        self._next_norm_carbon = self.norm_carbon[self.time_step + 1]
-        self._forecast_norm_carbon = self.norm_carbon[(self.time_step+1):(self.time_step+1)+self.future_steps]
+        self._next_norm_carbon = self.norm_carbon[next_timestep]
+        # For forecast, use wrap-around slicing if needed
+        forecast_end = (self.time_step + 1 + self.future_steps) % len(self.norm_carbon)
+        if forecast_end > (self.time_step + 1):
+            self._forecast_norm_carbon = self.norm_carbon[(self.time_step+1):forecast_end]
+        else:  # Wraps around
+            self._forecast_norm_carbon = np.concatenate([
+                self.norm_carbon[(self.time_step+1):],
+                self.norm_carbon[:forecast_end]
+            ])
 
         return self._current_norm_carbon, self._forecast_norm_carbon, self._current_carbon_smooth
     
@@ -468,8 +522,20 @@ class CI_Manager():
 
         self._current_carbon_smooth = self.carbon_smooth[self.time_step]
         self._current_norm_carbon = self.norm_carbon[self.time_step]
-        self._next_norm_carbon = self.norm_carbon[self.time_step + 1]
-        self._forecast_norm_carbon = self.norm_carbon[(self.time_step+1):(self.time_step+1)+self.future_steps]
+
+        # REFACTORED (Nov 2025): Add bounds checking for next timestep access (same as reset)
+        next_timestep = (self.time_step + 1) % len(self.norm_carbon)
+        self._next_norm_carbon = self.norm_carbon[next_timestep]
+
+        # For forecast, use wrap-around slicing if needed
+        forecast_end = (self.time_step + 1 + self.future_steps) % len(self.norm_carbon)
+        if forecast_end > (self.time_step + 1):
+            self._forecast_norm_carbon = self.norm_carbon[(self.time_step+1):forecast_end]
+        else:  # Wraps around
+            self._forecast_norm_carbon = np.concatenate([
+                self.norm_carbon[(self.time_step+1):],
+                self.norm_carbon[:forecast_end]
+            ])
 
         return self._current_norm_carbon, self._forecast_norm_carbon, self._current_carbon_smooth
     
@@ -589,8 +655,10 @@ class Weather_Manager():
             tuple: Temperature at current step, normalized temperature at current step, wet bulb temperature at current step, normalized wet bulb temperature at current step.
         """
 
-        self.time_step = (init_day if init_day is not None else self.init_day) * self.time_steps_day + (init_hour if init_hour is not None else 0) * self.timestep_per_hour
-        
+        # REFACTORED (Nov 2025): Add bounds checking for variable-length datasets (consistent with other managers)
+        requested_timestep = (init_day if init_day is not None else self.init_day) * self.time_steps_day + (init_hour if init_hour is not None else 0) * self.timestep_per_hour
+        self.time_step = requested_timestep % len(self.original_temp_data)  # Wrap around if exceeds data length
+
         if not self.debug:
             # Add noise to the temperature data using the CoherentNoise
             coh_noise = self.coherent_noise.generate(len(self.original_temp_data))
@@ -619,9 +687,11 @@ class Weather_Manager():
             self.wet_bulb_data = np.ones_like(self.wet_bulb_data) * 25
             
         self._current_temp = self.temperature_data[self.time_step]
-        self._next_temp = self.temperature_data[self.time_step + 1]
+        # REFACTORED (Nov 2025): Add bounds checking for next timestep access
+        next_timestep = (self.time_step + 1) % len(self.temperature_data)
+        self._next_temp = self.temperature_data[next_timestep]
         self._current_norm_temp = self.norm_temp_data[self.time_step]
-        self._next_norm_temp = self.norm_temp_data[self.time_step + 1]
+        self._next_norm_temp = self.norm_temp_data[next_timestep]
         self._current_wet_bulb = self.wet_bulb_data[self.time_step]
         self._current_norm_wet_bulb = self.norm_wet_bulb_data[self.time_step]
         
@@ -645,9 +715,11 @@ class Weather_Manager():
             self.time_step = self.init_day*self.time_steps_day
             
         self._current_temp = self.temperature_data[self.time_step]
-        self._next_temp = self.temperature_data[self.time_step + 1]
+        # REFACTORED (Nov 2025): Add bounds checking for next timestep access
+        next_timestep = (self.time_step + 1) % len(self.temperature_data)
+        self._next_temp = self.temperature_data[next_timestep]
         self._current_norm_temp = self.norm_temp_data[self.time_step]
-        self._next_norm_temp = self.norm_temp_data[self.time_step + 1]
+        self._next_norm_temp = self.norm_temp_data[next_timestep]
         self._current_wet_bulb = self.wet_bulb_data[self.time_step]
         self._current_norm_wet_bulb = self.norm_wet_bulb_data[self.time_step]
             

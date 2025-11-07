@@ -12,17 +12,17 @@ from harl.utils.trans_tools import _t2n
 # sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), os.pardir, 'dc-rl')))
 from utils.base_agents import BaseLoadShiftingAgent, BaseHVACAgent, BaseBatteryAgent
 
-MODEL_PATH = 'trained_models'
+MODEL_PATH = 'results/sustaindc/ny/happo/ny_quicktest'
 SAVE_EVAL = "results"
 ENV = 'sustaindc'
-LOCATION = "az"
-AGENT_TYPE = "haa2c"
-RUN = "seed-00001-2024-06-04-20-41-56"
+LOCATION = "ny"
+AGENT_TYPE = "happo"
+RUN = "seed-00001-2025-11-03-17-35-09"
 ACTIVE_AGENTS = ['agent_ls', 'agent_dc', 'agent_bat']
-NUM_EVAL_EPISODES = 1
+NUM_EVAL_EPISODES = 3  # Run 3 episodes for comprehensive analysis
 
 # load trained algo and env configs
-with open(os.path.join(MODEL_PATH, ENV, LOCATION, AGENT_TYPE, AGENT_TYPE+"3agents",RUN,'config.json'), encoding='utf-8') as file:
+with open(os.path.join(MODEL_PATH, RUN, 'config.json'), encoding='utf-8') as file:
         saved_config = json.load(file)
 
 # read the algo, env and main args
@@ -31,7 +31,7 @@ algo_args, env_args, main_args = saved_config['algo_args'], saved_config['env_ar
 # update the algo_args with the new values
 algo_args['train']['n_rollout_threads'] = 1
 algo_args['eval']['n_eval_rollout_threads'] = 1
-algo_args['train']['model_dir'] = os.path.join(MODEL_PATH, ENV, LOCATION, AGENT_TYPE, AGENT_TYPE+"3agents",RUN, 'models')
+algo_args['train']['model_dir'] = os.path.join(MODEL_PATH, RUN, 'models')
 # specify the top level folder to save the results
 algo_args["logger"]["log_dir"] = SAVE_EVAL
 # adjust number of eval episodes

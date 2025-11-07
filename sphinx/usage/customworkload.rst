@@ -15,7 +15,14 @@ The default workload traces are extracted from:
 Expected File Format
 -----------------------
 
-Workload trace files should be in :code:`.csv` format, with two columns: a timestamp or index (must be unnamed), and the corresponding DC Utilization (:code:`cpu_load`). The CPU load must be expressed as a fraction of the DC utilization (between 0 and 1). The workload file must contain one year of data with an hourly periodicity (365*24=8760 rows). 
+Workload trace files should be in :code:`.csv` format, with two columns: a timestamp or index (must be unnamed), and the corresponding DC Utilization (:code:`cpu_load`). The CPU load must be expressed as a fraction of the DC utilization (between 0 and 1).
+
+**Dataset Length Requirements** (updated November 2025):
+
+- **Minimum**: 7 days (168 hours) of hourly data - sufficient for one episode
+- **Recommended**: 365 days (8760 hours) for full year coverage
+- **Variable-length support**: Datasets shorter than 365 days are now supported and will wrap around if episodes extend beyond the available data
+- **Example**: The Alibaba Spot GPU v2026 dataset contains 184 days (4,418 hours) and works seamlessly 
 
 Example Workload Trace File
 --------------------------------
